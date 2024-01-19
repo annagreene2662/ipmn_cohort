@@ -1,0 +1,189 @@
+library(tidyverse)
+
+# Updating Vital status
+pts <- con %>%
+  dbGetQuery("SELECT * FROM CDM.GI_CDM.V_GI_PATIENT_INFO") %>%  filter(MRN %in% mrns)
+
+pts.dem<- con %>%
+  dbGetQuery("SELECT PATIENT_ID, LAST_CONTACT_OR_DEATH_DT, VITAL_STATUS_DESC
+ FROM CDM.GI_CDM.V_GI_REGISTRY_GENERAL") %>% filter(PATIENT_ID %in% ptid$PATIENT_ID)
+
+ptid<- pts %>% filter(MRN %in% mrns) %>%  select(MRN, PATIENT_ID)
+
+pts.dem <- pts.dem %>% left_join(ptid, by= "PATIENT_ID") %>%  select(-PATIENT_ID)
+
+# Write out
+write.csv(pts.dem, file="C:/Users/Anna/OneDrive - Moffitt Cancer Center/Lab/Radiomics/Data original/Vital_status.csv")
+
+
+abs<- read_excel("Import_data/IPMN_ICG_master_combined_radiomics.xlsx")
+abs.2<- abs %>% filter(mrn %in% mrns)
+
+
+# Updating the three patients with pathology missing 
+View(abs.2[which(abs.2$mrn %in% pat.missing), c("mrn", "fpc.primary_site.1", "fpc.histology.1", "IPMN", "histology_Paola", "Histology_former", 
+                                           "Histology_FINAL", "IPMN_TYPE", "IPMN_grade_jbp", "Sebastian_diagnosis")])
+
+
+write.csv(abs.2[which(abs.2$mrn %in% pat.missing), c("mrn", "fpc.primary_site.1", "fpc.histology.1", "IPMN", "histology_Paola", "Histology_former", 
+                                                     "Histology_FINAL", "IPMN_TYPE", "IPMN_grade_jeong", "IPMN_grade_jbp", "Sebastian_diagnosis")], file="Exports/Info_missing_patients.csv", row.names = FALSE)
+
+
+### Finding new blood 
+load("~/Import_data/find_new_blood.RData")
+
+pts_tma <- pts %>%
+  filter(MRN %in% !!mrns$mrn) %>% 
+  collect()
+
+sm_tma <- sm %>%
+  filter(PATIENT_ID %in% !!pts_tma$PATIENT_ID) %>% collect()
+
+sm_tma <- sm_tma %>% left_join(pts_tma %>% select(MRN, PATIENT_ID), by= "PATIENT_ID")
+
+save(sm_tma, file= "Exports/IPMN_TMA_blood.RData")
+
+
+## Finding CT scans 
+load("Datasets/ED_combined.RData")
+pros<- ed %>% filter(substr(DATSTAT_ALTPID, 1, 3)== "ED-") %>% unique()
+pros.mrns<- as.character(na.omit(unique(pros$MRN)))
+
+pts_pros <- pts %>%
+  filter(MRN %in% !!pros.mrns) %>% 
+  collect()
+
+load("Datasets/ipmns_mrn.RData")
+
+pts_ipmn <- pts %>%
+  filter(MRN %in% !!export$mrn) %>% 
+  collect()
+
+sm_ipmn <- sm %>%
+  filter(PATIENT_ID %in% !!pts_ipmn$PATIENT_ID) %>% collect()
+
+pts_ipmn <-  pts_ipmn %>% left_join(export %>% rename(MRN= mrn), by="MRN")
+sm_ipmn <- sm_ipmn %>% left_join(pts_ipmn, by= "PATIENT_ID")
+
+save(sm_ipmn, file="Exports/IPMN_samples.RData")
+
+sv_ipmn <- sv %>%
+  filter(PATIENT_ID %in% !!pts_ipmn$PATIENT_ID) %>% collect()
+sv_ipmn <- sv_ipmn %>% left_join(pts_ipmn, by= "PATIENT_ID")
+
+save(sv_ipmn, file="Exports/IPMN_surveys.RData")
+
+
+## Numbers for progress report 
+load("~/Import_data/progress_report_n.RData")
+
+pts_pr <- pts %>%
+  filter(MRN %in% !!as.character(tb1$mrn)) %>% 
+  collect()
+cr_pr <- cr %>%
+  filter(PATIENT_ID %in% !!pts_pr$PATIENT_ID) %>% 
+  collect()
+ptssm_pr <- ptssm %>%
+  filter(PATIENT_ID %in% !!pts_pr$PATIENT_ID) %>% 
+  collect()
+
+mol_pr <- mol %>%
+  filter(PATIENT_ID %in% !!pts_pr$PATIENT_ID) %>% 
+  collect()
+
+labs_pr <- labs %>%
+  filter(PATIENT_ID %in% !!pts_pr$PATIENT_ID) %>% 
+  collect()
+
+vit_pr <- vit %>%
+  filter(PATIENT_ID %in% !!pts_pr$PATIENT_ID) %>% 
+  collect()
+
+bmi<- vit_pr %>% filter(VITALS_DESC == "BMI") %>% left_join(tb1 %>% select(PATIENT_ID, date_of_surgery), by= "PATIENT_ID") %>% 
+  mutate(date_diff= as.numeric(as.Date(date_of_surgery)- as.Date(VITALS_DTM))) 
+bmi<- bmi %>% filter(date_diff>= -365 & date_diff<= 365 ) %>% arrange(PATIENT_ID, date_diff) %>% 
+  group_by(PATIENT_ID) %>% mutate(Seq= seq_along(PATIENT_ID)) 
+
+tb1<- tb1%>% rename(MRN= mrn) %>% left_join(pts_pr %>% select(MRN, PATIENT_ID))
+
+crpr<- cr_pr %>%filter(PRIMARY_SITE_GROUP_DESC== "PANCREAS") %>% 
+  select(PATIENT_ID, TUMOR_ID, VITAL_STATUS_DESC, DX_DT, AGE_AT_DIAGNOSIS_NUM, 
+         PRIMARY_SITE_GROUP_DESC, HISTOLOGY_DESC, 
+         COMORBIDITY_01_DESC, COMORBIDITY_02_DESC, TYPE_OF_FIRST_RECURRENCE_DESC, 
+         TOBACCO_USE_CIGARETTES_DESC) %>% unique() %>% arrange(PATIENT_ID, DX_DT) %>% 
+  group_by(PATIENT_ID) %>% mutate(Seq= seq_along(PATIENT_ID)) 
+
+crpc<- crpr %>% filter(!(TUMOR_ID %in% c(888888, 777777, 999999, 111111,
+                                        444444, 000000, 333333)))
+tb1<- tb1  %>% left_join(crpc, by="PATIENT_ID")
+
+ptssmpr <- ptssm_pr %>% select(PATIENT_ID, RECENTLY_REPORTED_CIGARETTE_SMOKING_SV2_DESC) %>% unique()
+tb1<- tb1  %>% left_join(ptssmpr, by="PATIENT_ID")
+
+tb1 <-tb1  %>% left_join(bmi %>% filter(Seq==1)  %>% select(PATIENT_ID, VITALS_DESC, VITALS_VALUE), by="PATIENT_ID") 
+
+# save the database
+#save(tb1, file="Datasets/tableone.RData")
+
+tb1 <- tb1 %>%  mutate(Ethnicity= ifelse(!is.na(ethnicity) & ethnicity== 1, "Hispanic/Latino",  
+                                                               ifelse(!is.na(ethnicity) & ethnicity == 2, "Non-Hispanic/Non-Latino", NA)), 
+                       Race= ifelse(!is.na(race) & race== 1, "White",
+                                                          ifelse(!is.na(race) & race==  2, "Black /African American", 
+                                                                 ifelse(!is.na(race) & race==  3,"Asian",
+                                                                        ifelse(!is.na(race) & race==  4,"Native Hawaiian or Other Pacific Islander",
+                                                                               ifelse(!is.na(race) & race==  5,"American Indian, Aleutian, or Eskimo", 
+                                                                                      ifelse(!is.na(race) & race==  6,"Other", 
+                                                                                             ifelse(!is.na(race) & race==  8,"More than 1 race", NA))))))), 
+                        Gender= ifelse(!is.na(gender) & gender==  2,"Female", 
+                                                            ifelse(!is.na(gender) & gender==  1, "Male", NA)), 
+                        Ethnicity= ifelse(is.na(Ethnicity) & !is.na(ETHNICITY_DERIVED_DESC), ETHNICITY_DERIVED_DESC,  
+                                          ifelse(is.na(Ethnicity) & is.na(ETHNICITY_DERIVED_DESC), "Unknown", Ethnicity)), 
+                        Race= ifelse(is.na(Race) & !is.na(RACE_DERIVED_DESC), RACE_DERIVED_DESC, 
+                                     ifelse(is.na(Race) & is.na(RACE_DERIVED_DESC), "Unknown", Race)), 
+                        Gender= ifelse(is.na(Gender) & !is.na(GENDER_DERIVED_DESC), GENDER_DERIVED_DESC, 
+                                       ifelse(is.na(Gender) & is.na(GENDER_DERIVED_DESC), "Unknown", Gender)), 
+                        Age= ifelse(is.na(AGE_AT_DIAGNOSIS_NUM) &!is.na(dob) & !is.na(date_of_diagnosis), floor(as.numeric(as.Date(tb1$date_of_diagnosis)- as.Date(tb1$dob))/365.25), 
+                                   ifelse(is.na(AGE_AT_DIAGNOSIS_NUM) &!is.na(dob) & is.na(date_of_diagnosis) & !is.na(date_of_surgery), floor(as.numeric(as.Date(tb1$date_of_surgery)- as.Date(tb1$dob))/365.25), 
+                                          ifelse(!is.na(AGE_AT_DIAGNOSIS_NUM), AGE_AT_DIAGNOSIS_NUM, NA))), 
+                        BMI= round(as.numeric(VITALS_VALUE),0 ),
+                       Histology= HISTOLOGY_DESC,
+                       `IPMN grade`= grade_cat,
+                       `High risk stigmata`= ifelse(fukuokahr_ct==1 , "Yes", ifelse(fukuokahr_ct==0 , "No", NA)), 
+                       `Worrisome features`= ifelse(fukuokaw_ct==1 , "Yes", ifelse(fukuokaw_ct==0 , "No", NA)),
+                       `Vital status`= ifelse(  !is.na(DERIVED_VITAL_STATUS_DESC) & DERIVED_VITAL_STATUS_DESC== "DEAD"& !is.na(VITAL_STATUS_DESC) & VITAL_STATUS_DESC== "DEAD"|
+                                                 is.na(DERIVED_VITAL_STATUS_DESC) & !is.na(VITAL_STATUS_DESC) & VITAL_STATUS_DESC== "DEAD"|
+                                                !is.na(DERIVED_VITAL_STATUS_DESC) & is.na(VITAL_STATUS_DESC) & DERIVED_VITAL_STATUS_DESC== "DEAD"|
+                                                !is.na(DERIVED_VITAL_STATUS_DESC) & DERIVED_VITAL_STATUS_DESC== "ALIVE" & !is.na(VITAL_STATUS_DESC) & VITAL_STATUS_DESC== "DEAD"|
+                                                !is.na(DERIVED_VITAL_STATUS_DESC) & DERIVED_VITAL_STATUS_DESC== "DEAD" & !is.na(VITAL_STATUS_DESC) & VITAL_STATUS_DESC== "ALIVE", "Dead",
+                                              ifelse(!is.na(DERIVED_VITAL_STATUS_DESC) & DERIVED_VITAL_STATUS_DESC== "ALIVE" & !is.na(VITAL_STATUS_DESC) & VITAL_STATUS_DESC == "ALIVE"|
+                                                       is.na(DERIVED_VITAL_STATUS_DESC) & !is.na(VITAL_STATUS_DESC) & VITAL_STATUS_DESC== "ALIVE"|
+                                                       !is.na(DERIVED_VITAL_STATUS_DESC) & is.na(VITAL_STATUS_DESC) & DERIVED_VITAL_STATUS_DESC== "ALIVE", "Alive", NA)), 
+                       `Smoking Status`= ifelse(!is.na(TOBACCO_USE_CIGARETTES_DESC) & TOBACCO_USE_CIGARETTES_DESC == "CURRENT USER", "Current", 
+                                                ifelse(!is.na(TOBACCO_USE_CIGARETTES_DESC) & TOBACCO_USE_CIGARETTES_DESC %in% c("FORMER USER/QUIT >1 YR", "FORMER USER/QUIT 1 YR", "FORMER USER/QUIT UNKNOWN"), "Former", 
+                                                       ifelse(!is.na(TOBACCO_USE_CIGARETTES_DESC) & TOBACCO_USE_CIGARETTES_DESC== "NEVER USED", "Never", "Unknown"))), 
+                       Recurrence= ifelse(TYPE_OF_FIRST_RECURRENCE_DESC %in% c("DIST RECUR (LIVER)", "DIST RECUR (LUNG)", "DISTANT RECURRENCE, NOS", "DISTANT RECURRENCE, NOS,DIST RECUR (LIVER),DIST RECUR (LUNG)", 
+                                                                               "RECUR TO MULTI DIST SITES"), "Distant", 
+                                          ifelse(TYPE_OF_FIRST_RECURRENCE_DESC %in% c("IN SITU RECUR OF IN SITU", "LOCAL RECUR OF INVAS CA", "LOCAL RECURRENCE, BEHAV N", "RECURRED, TYPE OR SITE UN", 
+                                                                                      "REG RECURRENCE, NOS (20)", "REGIONAL TISSUE RECUR OF"), "Local/Regional", 
+                                                 ifelse(TYPE_OF_FIRST_RECURRENCE_DESC %in% c("NEVER DISEASE FREE SINCE", "PROGRESSION SINCE LAST RE"), "Never disease free", 
+                                                        ifelse(TYPE_OF_FIRST_RECURRENCE_DESC %in% c("NO RECURRENCE; DISEASE FR"), "No recurrence", 
+                                                               ifelse(TYPE_OF_FIRST_RECURRENCE_DESC %in% c("UNKNOWN IF RECURRED (99)", ""), "Unknown", NA)))))) 
+library(gtsummary)
+
+tb1 %>% select(Ethnicity:`Smoking Status`, BMI:Recurrence) %>% tbl_summary()
+
+# Getting data from surveillance and ipmn people
+load("~/Import_data/IPM.RData")
+pts <- tbl(con,in_schema ("DATACORE", "V_D_PATIENT"))
+pts<- pts %>% filter(MRN  %in% !!ipmn.mcc$mrn) %>% collect()
+
+vit<- tbl(con,in_schema ("DATACORE", "V_EMR_VITALS"))
+vit_pr <- vit %>%
+  filter(PATIENT_ID %in% !!pts$PATIENT_ID) %>% 
+  collect()
+
+inf <- tbl(con,in_schema ("DATACORE", "V_EMR_PATIENT_INFO"))
+inf<- inf %>% filter(PATIENT_ID %in% !!pts$PATIENT_ID) %>% 
+  collect()
+inf <- merge(inf, pts %>% select(MRN, PATIENT_ID, TCC_ID), by="PATIENT_ID")
+save(inf, file="Datasets/IPMN_surveillance.RData")
