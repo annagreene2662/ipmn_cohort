@@ -1,0 +1,308 @@
+library(dplyr)
+########### Pull REDCap data ##########  
+library(RCurl)
+uri <- "https://redcapmoffit.org/api/cloud/redcap5830"
+token  <- "87643245DVUWFWL"  
+
+### Call the server
+rawCsvText <- RCurl::postForm(
+  uri = uri, 
+  token = token, 
+  content ='record',
+  format = 'csv', 
+  type = 'flat', 
+  .opts = curlOptions(ssl.verifypeer=FALSE)
+)
+
+ds <- read.csv(text=rawCsvText,  stringsAsFactors=FALSE)
+ds[ds== ""] <- NA
+ds[ds== "NA"] <- NA
+
+## Surveys form 
+token.s<- "JKGCKUHI8637707"
+url.s <- "https://redcapsurveys.moffit.org/api/cloud/redcap8264"
+
+rawCsvText <- RCurl::postForm(
+  uri = url.s, 
+  token = token.s, 
+  content ='record',
+  format = 'csv', 
+  type = 'flat', 
+  .opts = curlOptions(ssl.verifypeer=FALSE)
+)
+
+dss <- read.csv(text=rawCsvText,  stringsAsFactors=FALSE)
+dss[dss== ""] <- NA
+dss[dss== "NA"] <- NA
+
+load("R:/Study_Team/Administration/GRANTS/Awarded_IPMNs/Datasets/Data_harmonization/R datasets/ED_combined.RData")
+dt.1<- dss[c("seq_id","mrn", "datstat_altpid", "ductal_communication_ct_t1", "path_1_class___branchside", "path_1_class___mainduct", "path_1_class___unk")]
+dt.2<- ds[c("mrn", "ductal_communication_ct_t1", "path_1_class___branchside", "path_1_class___mainduct", "path_1_class___unk")]
+dt.3<- ed.cyst %>% filter(DUCTAL_COMMUNICATION_CT_T1 %in% c(2, 3, 4)) %>% 
+  select(DATSTAT_ALTPID, DUCTAL_COMMUNICATION_CT_T1) %>% rename(datstat_altpid=DATSTAT_ALTPID)
+
+dt<- merge(dt.1, dt.2, by="mrn", all=T)
+dt<- merge(dt, dt.3, by="datstat_altpid", all.x=T)
+
+dt<- dt %>% mutate(DUCTAL_COMMUNICATION_CT_T1.dat=ifelse(DUCTAL_COMMUNICATION_CT_T1==3, 1, 
+                                                         ifelse(DUCTAL_COMMUNICATION_CT_T1==2, 2, 
+                                                                ifelse(DUCTAL_COMMUNICATION_CT_T1==4, 3, NA))),
+                   ductal_communication_ct_t1= ductal_communication_ct_t1.y, 
+                   path_1_class___branchside= ifelse((!is.na(path_1_class___branchside.x) & path_1_class___branchside.x==1)|
+                                                       (!is.na(path_1_class___branchside.y) & path_1_class___branchside.y==1), 1, 0), 
+                   
+                   path_1_class___mainduct= ifelse((!is.na(path_1_class___mainduct.x) & path_1_class___mainduct.x==1)|
+                                                     (!is.na(path_1_class___mainduct.y) & path_1_class___mainduct.y==1), 1, 0), 
+                   
+                   path_1_class___unk= ifelse((!is.na(path_1_class___unk.x) & path_1_class___unk.x==1)|
+                                                (!is.na(path_1_class___unk.y) & path_1_class___unk.y==1), 1, 0))
+
+dt<- dt %>% mutate(path_1_class___unk= ifelse(path_1_class___unk==1 & (path_1_class___mainduct==1 | path_1_class___branchside==1), 0, path_1_class___unk))
+dt<- dt %>% select("mrn", "seq_id", "ductal_communication_ct_t1", "path_1_class___branchside" , "path_1_class___mainduct", "path_1_class___unk") 
+
+lapply(dt %>% select(DUCTAL_COMMUNICATION_CT_T1.dat, ductal_communication_ct_t1, 
+                     path_1_class___branchside,path_1_class___mainduct, path_1_class___unk), 
+       function(x) table(x))
+
+
+
+dt<- dt %>% mutate(DatStat= ifelse(!is.na(DUCTAL_COMMUNICATION_CT_T1.dat) & DUCTAL_COMMUNICATION_CT_T1.dat==1, "Main duct", 
+                                   ifelse(!is.na(DUCTAL_COMMUNICATION_CT_T1.dat) & DUCTAL_COMMUNICATION_CT_T1.dat==2, "Side branch", 
+                                          ifelse(!is.na(DUCTAL_COMMUNICATION_CT_T1.dat) & DUCTAL_COMMUNICATION_CT_T1.dat==3, "Mixed", "Not reported"))), 
+                   `Master files`= ifelse(!is.na(ductal_communication_ct_t1) & ductal_communication_ct_t1==1, "Main duct", 
+                                          ifelse(!is.na(ductal_communication_ct_t1) & ductal_communication_ct_t1==2, "Side branch", 
+                                                 ifelse(!is.na(ductal_communication_ct_t1) & ductal_communication_ct_t1==3, "Mixed", "Not reported"))), 
+                   `New abstraction`= ifelse(!is.na(path_1_class___branchside) & path_1_class___branchside==1 &  !is.na(path_1_class___mainduct) & path_1_class___mainduct==1, "Mixed", 
+                                             ifelse(!is.na(path_1_class___branchside) & path_1_class___branchside==1 &  is.na(path_1_class___mainduct), "Side branch", 
+                                                    ifelse(is.na(path_1_class___branchside) &  !is.na(path_1_class___mainduct) & path_1_class___mainduct==1, "Main duct", "Not reported"))), 
+                   
+                   datstat= ifelse(!is.na(DUCTAL_COMMUNICATION_CT_T1.dat) & DUCTAL_COMMUNICATION_CT_T1.dat==1, 2, 
+                                   ifelse(!is.na(DUCTAL_COMMUNICATION_CT_T1.dat) & DUCTAL_COMMUNICATION_CT_T1.dat==2, 1, 
+                                          ifelse(!is.na(DUCTAL_COMMUNICATION_CT_T1.dat) & DUCTAL_COMMUNICATION_CT_T1.dat==3, 3, 0))), 
+                   panc_master= ifelse(!is.na(ductal_communication_ct_t1) & ductal_communication_ct_t1==1, 2, 
+                                       ifelse(!is.na(ductal_communication_ct_t1) & ductal_communication_ct_t1==2, 1, 
+                                              ifelse(!is.na(ductal_communication_ct_t1) & ductal_communication_ct_t1==3, 3, 0))), 
+                   panc_survey= ifelse(!is.na(path_1_class___branchside) & path_1_class___branchside==1 &  !is.na(path_1_class___mainduct) & path_1_class___mainduct==1, 3, 
+                                       ifelse(!is.na(path_1_class___branchside) & path_1_class___branchside==1 &  is.na(path_1_class___mainduct), 1, 
+                                              ifelse(is.na(path_1_class___branchside) &  !is.na(path_1_class___mainduct) & path_1_class___mainduct==1, 2, 0))))
+
+# 1= Side branch 
+# 0= Not reported
+# 2= Main duct
+# 3= Mixed
+
+
+dt$IPMN_loc<- apply(dt[c("datstat", "panc_master")], 1, function(x) max(x))
+# %>% filter(mrn %in% dss[which(dss$ipmn_surveillance==1),]$mrn)
+View(dt  %>% 
+       group_by(DatStat, `Master files`, IPMN_loc) %>% summarise(N= n()))
+
+branch<- dt %>% select(mrn, IPMN_loc) %>% filter(IPMN_loc %in% c(1, 0))
+main_mix<- dt %>% select(mrn, IPMN_loc) %>% filter(IPMN_loc %in% c(2, 3))
+
+save(branch, file="R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/Side_branch_mrns.RData")
+save(main_mix, file="R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/Main_duct_mrns.RData")
+
+
+write.csv(dss %>% filter((ipmn_surgical_confirmed_combined==1 | pdac==1 | (ipmn_surveillance==1 & dss$vital_status==0)) & site== "MCC") %>% 
+            select(mrn, date_of_surgery, ipmn_surgical_confirmed_combined, pdac, ipmn_surveillance), 
+          file="R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/ipmn_mrns.RData", row.names = F)
+
+dtb<- dss %>% filter((ipmn_surgical_confirmed_combined==1 | pdac==1 | (ipmn_surveillance==1 & dss$vital_status==0)) & site== "MCC") %>% 
+  select(mrn, date_of_surgery, ipmn_surgical_confirmed_combined, pdac, ipmn_surveillance)
+
+dtb<- merge(dtb, dt %>% select(mrn, IPMN_loc), by="mrn")
+
+## IPMN 
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/Side_branch_mrns.RData")
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/Main_duct_mixed_mrns.RData")
+
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/IPMN_imaging_blood_cyst.RData")
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/PDAC_imaging_blood_cyst.RData")
+
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/blood.RData")
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/PDAC_blood.RData")
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/PDAC_I.RData")
+
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/IPMN_cyst.RData")
+
+# Samples
+lv <- read.csv("R:/Study_Team/Administration/GRANTS/Awarded_IPMNs/Datasets/Data_harmonization/lv_data/export.csv")
+
+samps<- lv %>% filter(AnatomicSite %in% c("Blood", "Cystic Fluid", "Pancreas NOS") & 
+                        CollectionMethod %in% c("Phlebotomy", "FNA") & SampleStatus== "In Circulation") %>% 
+  select(MRN, CollectionDate,  AnatomicSite, SampleType, GrossDiagnosis) %>% unique()
+
+blood.lv<- samps %>% filter(AnatomicSite %in% c("Blood") & SampleType== "Plasma") %>% 
+  select(MRN, CollectionDate,  AnatomicSite) %>% mutate(seq=ave(MRN, MRN, FUN=seq_along))
+
+blood.lv<- merge(blood.lv, dss %>% select(mrn, date_of_surgery) %>% mutate(MRN=mrn), by="MRN", all.x=T)
+blood.lv$pre_sx<- ifelse(as.Date(blood.lv$date_of_surgery)>= as.Date(blood.lv$CollectionDate), 1, 0)
+
+blood.lv<- blood.lv %>% filter(seq==2) %>% select(MRN) %>% mutate(Blood=1)
+
+cyst.lv<- samps %>% filter(AnatomicSite %in% c("Cystic Fluid", "Pancreas NOS") & GrossDiagnosis=="Not applicable" & SampleType=="Unprocessed Liquid Tissue") %>% 
+  select(MRN, CollectionDate,  AnatomicSite) %>% mutate(seq=ave(MRN, MRN, FUN=seq_along))
+
+cyst.lv<- cyst.lv %>% filter(seq==1) %>% select(MRN) %>% mutate(Cyst=1)
+
+cyst.combined<- merge(cyst, cyst.lv, by= "MRN", all = T)
+cyst.combined<- cyst.combined %>% mutate(Cyst= ifelse(Cyst.x==1|Cyst.y==1, 1, 0))
+
+
+samples<- merge(blood, cyst, by= c("MRN"), all=T)
+sb<- merge(sb, samples %>% rename(mrn= MRN), by="mrn", all.x=T)
+
+sb$Cyst<- NULL
+sb<- merge(sb, cyst.combined %>% rename(mrn=MRN), by="mrn", all.x=T)
+
+sb<- merge(branch, ipmn, by= "mrn")
+sb$imag<- ifelse(sb$MRI==1|sb$EUS==1, 1, NA)
+sb<- sb %>% mutate(Blood= ifelse(Blood.x==1| Blood.y==1, 1, 0), 
+                   Cyst= ifelse(Cyst.x==1| Cyst.y==1, 1, 0))
+
+# Pre-surgery 
+blood$pre_sx<- ifelse(as.Date(blood$date_of_surgery)>= as.Date(blood$SPECIMEN_COLLECTION_DT), 1, 0)
+presx<- blood %>% filter(pre_sx==1) %>% mutate(seq=ave(MRN, MRN, FUN=seq_along)) %>% filter(seq==1)
+
+presx.lv<- blood.lv %>% filter(pre_sx==1) %>% mutate(seq=ave(MRN, MRN, FUN=seq_along)) %>% filter(seq==1)
+
+presx.combined<- merge(presx %>% select(MRN, pre_sx), presx.lv %>% select(MRN, pre_sx), by="MRN", all=T)
+
+presx.combined$pre_sx<- ifelse(presx.combined$pre_sx.x==1|presx.combined$pre_sx.y==1, 1, NA)
+
+sb<- merge(sb, presx %>% select(MRN, SPECIMEN_COLLECTION_DT, pre_sx) %>% rename(mrn=MRN), by="mrn", all.x=T)
+
+library(readxl)
+pd <- read_excel("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/SubjectSearch.xlsx", 
+                 skip = 4)
+
+sb$precede<- ifelse(sb$mrn %in% pd$`Subject MRN`, 1, 0)
+
+table(sb$precede)
+
+# Add grade 
+sb<- merge(sb, dss %>% select(mrn, grade), by="mrn", all.x=T)
+sb<- sb %>% mutate(risk= ifelse(grade %in% c(3, 4), "hr", 
+                          ifelse(grade %in% c(1, 2), "lr", "unk")))
+
+
+# Surgical IPMN
+table(sb$IPMN_loc, sb$ipmn_surgical_confirmed_combined)
+
+lapply(sb[which(sb$ipmn_surgical_confirmed_combined==1), c("ipmn_surgical_confirmed_combined", "precede", "imag", "Blood", "Cyst", "pre_sx", "risk")], 
+       function(x) table(sb[which(sb$ipmn_surgical_confirmed_combined==1),]$IPMN_loc, x))
+
+lapply(sb[which(sb$ipmn_surveillance==1 & is.na(sb$ipmn_surgical_confirmed_combined)), c( "ipmn_surveillance", "precede", "imag", "Blood", "Cyst", "pre_sx", "risk")], 
+       function(x) table(sb[which(sb$ipmn_surveillance==1 & is.na(sb$ipmn_surgical_confirmed_combined)),]$IPMN_loc, x))
+
+## PDAC
+pdac<- merge(branch , pdac2 %>% rename(mrn= MRN), by= "mrn", all.y=T)
+
+pdac$imag<- ifelse(pdac$MRI==1|pdac$EUS==1, 1, NA)
+
+lapply(pdac[ c("imag", "Blood", "Cyst")], 
+       function(x) table(x))
+pdac<- pdac %>% mutate(precede= ifelse(grepl("38110", PROTOCOL_NUM.1)| grepl("38110", PROTOCOL_NUM.2)| grepl("38110", PROTOCOL_NUM.3), 1, 0), 
+                       FPC= ifelse(grepl("56565|32323|18398|21546", PROTOCOL_NUM.1)| grepl("56565|32323|18398|21546", PROTOCOL_NUM.2)| grepl("56565|32323|18398|21546", PROTOCOL_NUM.3), 1, 0), 
+                       TCC=ifelse(grepl("15780", PROTOCOL_NUM.1)| grepl("15780", PROTOCOL_NUM.2)| grepl("15780", PROTOCOL_NUM.3), 1, 0), 
+                       eligible= ifelse(precede==1 | FPC==1 | TCC==1, 1, 0))
+                       #TCC= ifelse(precede==0 & FPC==0 & (TCC==0|TCC==1), 1, 0)) 
+
+pdac3<- pdac
+
+
+# Pre surgery blood 
+# Blood from Snowflake/MCAP
+presx.pdac<- blood.pdac %>% left_join(pdac %>% select(PATIENT_ID, TREATMENT_START_DT), by="PATIENT_ID") 
+presx.pdac<- presx.pdac %>% 
+  mutate(pre_sx= as.Date(TREATMENT_START_DT)> as.Date(SPECIMEN_COLLECTION_DT), 1, 0) %>% 
+  filter(pre_sx==1) %>% mutate(seq=ave(MRN, MRN, FUN=seq_along)) %>% filter(seq==1)
+
+presx.pdac.lv<- blood.lv %>% filter(pre_sx==1 & MRN %in% pdac3$mrn) %>% mutate(seq=ave(MRN, MRN, FUN=seq_along)) %>% filter(seq==1)
+
+presx.pdac.combined<- merge(presx.pdac %>% select(MRN, pre_sx), presx.pdac.lv %>% select(MRN, pre_sx), by="MRN", all=T)
+
+presx.pdac.combined$pre_sx<- ifelse(presx.pdac.combined$pre_sx.x==1|presx.pdac.combined$pre_sx.y==1, 1, NA)
+
+pdac3<- merge(pdac3, presx.pdac.combined %>% select(MRN, pre_sx) %>% rename(mrn=MRN), by="mrn", all.x=T)
+
+
+lapply(pdac3[which(pdac3$eligible==1), c("eligible", "precede", "TCC", "FPC", "imag", "Blood", "Cyst", "pre_sx")], 
+       function(x) table(x))
+
+lapply(pdac3[which(pdac3$eligible==0), c("eligible", "precede", "TCC", "FPC", "imag", "Blood", "Cyst", "pre_sx")], 
+       function(x) table(x))
+
+
+### Main duct and mixed 
+mdm<- merge(main_mix, ipmn, by= "mrn")
+mdm$Cyst<- NULL
+mdm<- merge(mdm, cyst.combined %>% rename(mrn=MRN), by="mrn", all.x=T)
+
+mdm$imag<- ifelse(mdm$MRI==1|mdm$EUS==1, 1, NA)
+mdm$precede<- ifelse(mdm$mrn %in% pd$`Subject MRN`, 1, 0)
+
+mdm<- merge(mdm, presx.combined %>% select(MRN, pre_sx) %>% rename(mrn=MRN), by="mrn", all.x=T)
+
+mdm<- merge(mdm, dss %>% select(mrn, grade), by="mrn", all.x=T)
+mdm<- mdm %>% mutate(risk= ifelse(grade %in% c(3, 4), "hr", 
+                                ifelse(grade %in% c(1, 2), "lr", "unk")))
+
+# Surgical IPMN
+table(mdm$IPMN_loc, mdm$ipmn_surgical_confirmed_combined)
+
+lapply(mdm[which(mdm$ipmn_surgical_confirmed_combined==1), c("ipmn_surgical_confirmed_combined", "precede", "imag", "Blood", "Cyst", "pre_sx", "risk")], 
+       function(x) table(x))
+
+lapply(mdm[which(mdm$ipmn_surveillance==1 & is.na(mdm$ipmn_surgical_confirmed_combined)), c( "ipmn_surveillance", "precede", "imag", "Blood", "Cyst", "pre_sx", "risk")], 
+       function(x) table(x))
+
+## Saving the dataset 
+dtb<- merge(dtb, sb %>% select(mrn, PATIENT_ID, EUS, MRI, imag, Blood, Cyst, precede, SPECIMEN_COLLECTION_DT, pre_sx, grade, risk), by="mrn", all.x=T)
+
+
+# Load next protocol info
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/Protocol1.RData")
+load("R:/Proj/Anna/Team/Grants/Side Branch IPMN/Data/TCC_SAMPLES.RData")
+
+length(intersect(dss$mrn, pros$MRN))
+length(intersect(dss[which(dss$ipmn_surgical_confirmed_combined==1|dss$mcn==1|dss$pdac==1),]$mrn, pros$MRN))
+
+fpc<- merge(pros %>% select(MRN, PATIENT_ID)%>% rename(mrn= MRN), dss %>% select(mrn, ipmn_surgical_confirmed_combined, pdac, mcn, date_of_surgery), by="mrn")
+
+fpc.samp<- merge(fpc, sm2, by="PATIENT_ID")
+fpc.samp<- fpc.samp %>% filter(SAMPLE_TYPE== "Plasma" &  STORAGE_STATUS_TYPE== "In Circulation") %>% 
+  mutate(pre_sx= as.Date(date_of_surgery)> as.Date(SPECIMEN_COLLECTION_DT), 1, 0) %>% 
+  filter(pre_sx==1) %>% mutate(seq=ave(mrn, mrn, FUN=seq_along)) %>% filter(seq==1)
+
+fpc.samp<- merge(fpc.samp, dt %>% select(mrn, IPMN_loc), by="mrn", ALL.x=T)
+
+# Cyst fluid 
+fpc.cyst<- merge(fpc, sm2, by="PATIENT_ID")
+fpc.cyst<- fpc.cyst %>% filter(COLLECTION_SITE_ANATOMIC_DESC %in% c("Cystic Fluid", "Pancreas NOS") & COLLECTION_GROSS_DIAGNOSIS_DESC=="Not applicable" & SAMPLE_TYPE=="Unprocessed Liquid Tissue" &  STORAGE_STATUS_TYPE== "In Circulation") %>% 
+  # select(MRN, CollectionDate,  COLLECTION_SITE_ANATOMIC_DESC) %>% 
+  mutate(seq=ave(mrn, mrn, FUN=seq_along))
+
+
+sb.ipmn.sx<- sb[which(sb$ipmn_surgical_confirmed_combined==1 & sb$pre_sx==1 & sb$IPMN_loc==1),]$mrn
+suspe.ipmn.sx<- sb[which(sb$ipmn_surgical_confirmed_combined==1 & sb$pre_sx==1 & sb$IPMN_loc==0),]$mrn
+mdm.ipmn.sx<- mdm[which(mdm$ipmn_surgical_confirmed_combined==1 & mdm$pre_sx==1),]$mrn
+pdac.sx<- pdac3[which(pdac3$eligible==1 & pdac3$pre_sx==1),]$mrn
+
+sb.ipmn.cyst<- sb[which(sb$ipmn_surgical_confirmed_combined==1 & sb$Cyst==1 & sb$IPMN_loc==1),]$mrn
+suspe.ipmn.cyst<- sb[which(sb$ipmn_surgical_confirmed_combined==1 & sb$Cyst==1 & sb$IPMN_loc==0),]$mrn
+mdm.ipmn.cyst<- mdm[which(mdm$ipmn_surgical_confirmed_combined==1 & mdm$Cyst==1),]$mrn
+pdac.cyst<- pdac3[which(pdac3$eligible==1 & pdac3$Cyst==1),]$mrn
+
+table(fpc.samp[which(!(fpc.samp$mrn %in% sb.ipmn.sx)),]$ipmn_surgical_confirmed_combined)
+table(fpc.samp[which(!(fpc.samp$mrn %in% suspe.ipmn.sx)),]$ipmn_surgical_confirmed_combined)
+table(fpc.samp[which(!(fpc.samp$mrn %in% mdm.ipmn.sx)),]$ipmn_surgical_confirmed_combined)
+table(fpc.samp[which(!(fpc.samp$mrn %in% pdac.sx)),]$pdac)
+
+
+table(fpc.cyst[which(!(fpc.cyst$mrn %in% sb.ipmn.cyst)),]$ipmn_surgical_confirmed_combined)
+table(fpc.cyst[which(!(fpc.cyst$mrn %in% suspe.ipmn.cyst)),]$ipmn_surgical_confirmed_combined)
+table(fpc.cyst[which(!(fpc.cyst$mrn %in% sb.ipmn.cyst)),]$ipmn_surveillance)
+table(fpc.cyst[which(!(fpc.cyst$mrn %in% mdm.ipmn.cyst)),]$ipmn_surgical_confirmed_combined)
+table(fpc.cyst[which(!(fpc.cyst$mrn %in% pdac.cyst)),]$pdac)
